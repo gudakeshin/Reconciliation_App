@@ -1,0 +1,8 @@
+flask
+flask-cors
+pandas
+openpyxl
+openai
+python-dotenv
+requests
+xlsxwriter # Added for Excel report generation features
