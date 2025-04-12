@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel File Reconciliation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        /* Custom styles (same as before) */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .file-drop-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: background-color 0.2s ease;
+        }
+        .file-drop-area.dragover {
+            background-color: #e9e9e9;
+        }
+        .header-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0; /* gray-200 */
+            border-radius: 8px;
+            padding: 0.5rem;
+        }
+        .header-item {
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            margin-bottom: 0.25rem;
+            transition: background-color 0.2s ease;
+        }
+        .header-item:hover {
+            background-color: #f1f5f9; /* cool-gray-100 */
+        }
+        .header-item.selected {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+            font-weight: 500;
+        }
+        .mapping-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 1rem;
+            align-items: center;
+        }
+         /* Style for the message box */
+        #message-box {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out, display 0s linear 0.5s; /* Delay display none */
+            display: none; /* Hidden by default */
+        }
+        #message-box.show {
+            display: block;
+            opacity: 1;
+            transition: opacity 0.5s ease-in-out;
+        }
+        /* Progress & Loading Styles */
+        #progress-section.hidden {
+             display: none;
+        }
+        #loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #3b82f6; /* blue-500 */
+            animation: spin 1s ease infinite;
+            display: none; /* Hidden by default */
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Ensure results section is hidden initially */
+        #results-section.hidden {
+            display: none;
+        }
+        /* Styling for code blocks in error messages */
+        code.inline-code {
+             background-color: #e5e7eb; /* gray-200 */
+             color: #4b5563; /* gray-600 */
+             padding: 0.1rem 0.3rem;
+             border-radius: 4px;
+             font-family: monospace;
+             font-size: 0.85em;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-6xl mx-auto bg-white p-8 rounded-lg shadow-md">
+        <h1 class="text-3xl font-bold mb-6 text-gray-800">Excel File Reconciliation</h1>
+
+        <div class="grid md:grid-cols-2 gap-8 mb-8">
+            <div>
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">File 1</h2>
+                <div id="file1-drop-area" class="file-drop-area mb-3">
+                    <p class="text-gray-500">Drag & drop File 1 here or</p>
+                    <input type="file" id="file1-input" accept=".xlsx, .xls" class="hidden">
+                    <label for="file1-input" class="mt-2 inline-block bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg cursor-pointer transition duration-150 ease-in-out">
+                        Browse File
+                    </label>
+                </div>
+                <div id="file1-info" class="text-sm text-gray-600">No file selected.</div>
+
+                <div id="recommendation-section" class="mt-4 hidden">
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                        <h3 class="text-lg font-semibold mb-2 text-yellow-800">AI Recommendations</h3>
+                        <div id="recommendation-display" class="mb-4"></div>
+                        <div class="flex justify-between">
+                            <button id="accept-recommendations" class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-lg">
+                                Accept Recommendations
+                            </button>
+                            <button id="override-recommendations" class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-4 rounded-lg">
+                                Choose My Own
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="file1-headers-container" class="mt-4 hidden">
+                    <h3 class="font-medium mb-2 text-gray-600">Select 3 Columns for Reconciliation:</h3>
+                    <div id="file1-headers" class="header-list"></div>
+                    <p class="text-xs text-gray-500 mt-1">Selected: <span id="file1-selected-count">0</span>/3</p>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="text-xl font-semibold mb-3 text-gray-700">File 2</h2>
+                <div id="file2-drop-area" class="file-drop-area mb-3">
+                    <p class="text-gray-500">Drag & drop File 2 here or</p>
+                    <input type="file" id="file2-input" accept=".xlsx, .xls" class="hidden">
+                    <label for="file2-input" class="mt-2 inline-block bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg cursor-pointer transition duration-150 ease-in-out">
+                        Browse File
+                    </label>
+                </div>
+                <div id="file2-info" class="text-sm text-gray-600">No file selected.</div>
+                <div id="file2-headers-container" class="mt-4 hidden">
+                    <h3 class="font-medium mb-2 text-gray-600">Select 3 Columns for Reconciliation:</h3>
+                    <div id="file2-headers" class="header-list"></div>
+                    <p class="text-xs text-gray-500 mt-1">Selected: <span id="file2-selected-count">0</span>/3</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="mapping-section" class="mb-8 hidden">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Map Reconciliation Columns</h2>
+            <p class="text-sm text-gray-600 mb-4">Match the selected columns from File 1 to their corresponding columns in File 2. The reconciliation will be based on these mapped pairs.</p>
+            <div id="mapping-grid" class="mapping-grid">
+                </div>
+        </div>
+
+        <div class="text-center mb-6">
+            <button id="reconcile-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg shadow-md transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                Reconcile Files
+            </button>
+        </div>
+
+        <div id="progress-section" class="text-center mb-6 hidden">
+             <div id="loading-spinner" style="display: block;"></div>
+             <p id="progress-text" class="text-gray-600 mb-2">Sending data and processing...</p>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">Reconciliation Complete</h2>
+            <div id="summary-display" class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 whitespace-pre-wrap">
+                </div>
+
+            <div id="analysis-section" class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200 hidden">
+                <h3 class="text-lg font-semibold mb-2 text-blue-700">AI Analysis</h3>
+                <div id="analysis-display" class="whitespace-pre-wrap">
+                     </div>
+            </div>
+
+            <div class="flex justify-between items-center">
+                <button id="download-report-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition duration-150 ease-in-out">
+                    Download Reconciliation Report (.xlsx)
+                </button>
+                <button id="analyze-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition duration-150 ease-in-out">
+                    Get AI Analysis
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="message-box">
+        <span id="message-text"></span>
+    </div>
+
+    <script>
+        // --- Configuration ---
+        const MAX_SELECTED_COLUMNS = 3;
+        const BACKEND_URL = 'http://127.0.0.1:5000'; // Base URL for backend
+
+        // --- State Variables ---
+        let file1 = null;
+        let file2 = null;
+        let file1HeadersInfo = { name: '', headers: [] };
+        let file2HeadersInfo = { name: '', headers: [] };
+        let selectedHeaders1 = []; // { header: string, originalIndex: number }[]
+        let selectedHeaders2 = []; // { header: string, originalIndex: number }[]
+        let columnMapping = {}; // { file1HeaderName: file2HeaderName }
+        let reportBlob = null;
+        let reconciliationSummaryData = null; // Store summary data for analysis
+
+        // --- DOM Elements ---
+        const file1Input = document.getElementById('file1-input');
+        const file1DropArea = document.getElementById('file1-drop-area');
+        const file1Info = document.getElementById('file1-info');
+        const file1HeadersContainer = document.getElementById('file1-headers-container');
+        const file1HeadersDiv = document.getElementById('file1-headers');
+        const file1SelectedCountSpan = document.getElementById('file1-selected-count');
+
+        const file2Input = document.getElementById('file2-input');
+        const file2DropArea = document.getElementById('file2-drop-area');
+        const file2Info = document.getElementById('file2-info');
+        const file2HeadersContainer = document.getElementById('file2-headers-container');
+        const file2HeadersDiv = document.getElementById('file2-headers');
+        const file2SelectedCountSpan = document.getElementById('file2-selected-count');
+
+        const recommendationSection = document.getElementById('recommendation-section');
+        const recommendationDisplay = document.getElementById('recommendation-display');
+        const acceptRecommendationsButton = document.getElementById('accept-recommendations');
+        const overrideRecommendationsButton = document.getElementById('override-recommendations');
+
+        const mappingSection = document.getElementById('mapping-section');
+        const mappingGrid = document.getElementById('mapping-grid');
+        const reconcileButton = document.getElementById('reconcile-button');
+        const progressSection = document.getElementById('progress-section');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const progressText = document.getElementById('progress-text');
+        const resultsSection = document.getElementById('results-section');
+        const summaryDisplay = document.getElementById('summary-display');
+        const analysisSection = document.getElementById('analysis-section');
+        const analysisDisplay = document.getElementById('analysis-display');
+        const downloadReportButton = document.getElementById('download-report-button');
+        const analyzeButton = document.getElementById('analyze-button');
+
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
+
+        // --- Utility Functions ---
+        function showMessage(text, type = 'info', duration = 4000) {
+            if (showMessage.timeoutId) {
+                clearTimeout(showMessage.timeoutId);
+                showMessage.timeoutId = null;
+            }
+            messageText.textContent = text;
+            messageBox.className = 'fixed bottom-5 left-1/2 transform -translate-x-1/2 p-4 rounded-lg shadow-lg text-sm font-medium z-50'; // Reset base classes
+            switch (type) {
+                case 'success': messageBox.classList.add('bg-green-100', 'text-green-800', 'border', 'border-green-300'); break;
+                case 'error': messageBox.classList.add('bg-red-100', 'text-red-800', 'border', 'border-red-300'); break;
+                case 'info': default: messageBox.classList.add('bg-blue-100', 'text-blue-800', 'border', 'border-blue-300'); break;
+            }
+            messageBox.style.display = 'block';
+            requestAnimationFrame(() => messageBox.classList.add('show'));
+            if (duration > 0) {
+                showMessage.timeoutId = setTimeout(() => {
+                    messageBox.classList.remove('show');
+                    messageBox.addEventListener('transitionend', function handler() {
+                        messageBox.style.display = 'none';
+                        messageBox.removeEventListener('transitionend', handler);
+                        showMessage.timeoutId = null;
+                    }, { once: true }); // Use { once: true } for cleaner removal
+                }, duration);
+            }
+        }
+        showMessage.timeoutId = null;
+
+        // --- File Handling and Header Parsing ---
+        function getExcelHeaders(file) { /* ... (unchanged from previous version) ... */
+            return new Promise((resolve, reject) => {
+                if (!file || !/\.(xlsx|xls)$/i.test(file.name)) {
+                    return reject(new Error("Invalid file type. Please upload .xlsx or .xls files."));
+                }
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const data = event.target.result;
+                        const workbook = XLSX.read(data, { type: 'binary', sheetRows: 1 });
+                        const firstSheetName = workbook.SheetNames[0];
+                        if (!firstSheetName) return reject(new Error(`File "${file.name}" seems empty or has no sheets.`));
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const headerData = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 0 });
+                        if (!headerData || headerData.length === 0 || headerData[0].length === 0) return reject(new Error(`File "${file.name}" has no headers in the first row.`));
+                        const headers = headerData[0].map(String);
+                        const uniqueHeaders = new Set(headers);
+                        if (uniqueHeaders.size !== headers.length) showMessage(`Warning: File "${file.name}" contains duplicate headers.`, 'info', 5000);
+                        resolve({ name: file.name, headers: headers });
+                    } catch (error) { reject(new Error(`Error reading headers from "${file.name}". Is it valid?`)); }
+                };
+                reader.onerror = (error) => reject(new Error(`Error reading file "${file.name}".`));
+                reader.readAsBinaryString(file);
+            });
+        }
+
+        async function handleFileSelect(selectedFile, fileIndex) { /* ... (unchanged from previous version, calls getColumnRecommendations) ... */
+            const infoDiv = fileIndex === 1 ? file1Info : file2Info;
+            const headersDiv = fileIndex === 1 ? file1HeadersDiv : file2HeadersDiv;
+            const headersContainer = fileIndex === 1 ? file1HeadersContainer : file2HeadersContainer;
+            infoDiv.textContent = `Processing ${selectedFile.name}...`;
+            headersContainer.classList.add('hidden');
+            headersDiv.innerHTML = '';
+            resetSelection(fileIndex);
+            try {
+                const headerInfo = await getExcelHeaders(selectedFile);
+                if (fileIndex === 1) {
+                    file1 = selectedFile;
+                    file1HeadersInfo = headerInfo;
+                    infoDiv.textContent = `File 1: ${headerInfo.name}`;
+                    displayHeaders(headerInfo.headers, headersDiv, 1);
+                } else {
+                    file2 = selectedFile;
+                    file2HeadersInfo = headerInfo;
+                    infoDiv.textContent = `File 2: ${headerInfo.name}`;
+                    displayHeaders(headerInfo.headers, headersDiv, 2);
+                }
+                showMessage(`Headers loaded for ${headerInfo.name}`, 'success');
+                if (file1 && file2) {
+                    await getColumnRecommendations(); // Get recommendations when both files are loaded
+                }
+            } catch (error) {
+                showMessage(error.message, 'error');
+                infoDiv.textContent = "No file selected.";
+                if (fileIndex === 1) file1 = null; else file2 = null;
+            } finally {
+                 checkReconcileButtonState();
+                 updateMappingSection();
+            }
+        }
+
+        // --- Header Selection and Mapping ---
+        function displayHeaders(headers, containerDiv, fileIndex) { /* ... (unchanged from previous version) ... */
+            const countSpan = fileIndex === 1 ? file1SelectedCountSpan : file2SelectedCountSpan;
+            containerDiv.innerHTML = '';
+            headers.forEach((header, index) => {
+                const item = document.createElement('div');
+                item.textContent = header || `(Column ${index + 1})`;
+                item.dataset.header = header;
+                item.dataset.index = index;
+                item.classList.add('header-item', 'text-sm');
+                item.onclick = () => toggleHeaderSelection(item, fileIndex);
+                containerDiv.appendChild(item);
+            });
+            updateSelectedCount(fileIndex);
+            const containerParent = fileIndex === 1 ? file1HeadersContainer : file2HeadersContainer;
+            containerParent.classList.remove('hidden');
+        }
+
+        function toggleHeaderSelection(item, fileIndex) { /* ... (unchanged from previous version) ... */
+            const headerName = item.dataset.header;
+            const originalIndex = parseInt(item.dataset.index);
+            const selectedHeaders = fileIndex === 1 ? selectedHeaders1 : selectedHeaders2;
+            const existingSelectionIndex = selectedHeaders.findIndex(h => h.header === headerName);
+
+            if (item.classList.contains('selected')) {
+                item.classList.remove('selected');
+                if (existingSelectionIndex > -1) selectedHeaders.splice(existingSelectionIndex, 1);
+            } else {
+                if (selectedHeaders.length < MAX_SELECTED_COLUMNS) {
+                    item.classList.add('selected');
+                    if (existingSelectionIndex === -1) selectedHeaders.push({ header: headerName, originalIndex: originalIndex });
+                } else {
+                    showMessage(`You can only select ${MAX_SELECTED_COLUMNS} columns.`, 'info');
+                }
+            }
+            updateSelectedCount(fileIndex);
+            updateMappingSection();
+            checkReconcileButtonState();
+        }
+
+        function updateSelectedCount(fileIndex) { /* ... (unchanged from previous version) ... */
+            const countSpan = fileIndex === 1 ? file1SelectedCountSpan : file2SelectedCountSpan;
+            const selectedHeaders = fileIndex === 1 ? selectedHeaders1 : selectedHeaders2;
+            countSpan.textContent = selectedHeaders.length;
+        }
+
+        function resetSelection(fileIndex) { /* ... (unchanged from previous version) ... */
+             if (fileIndex === 1) {
+                selectedHeaders1 = [];
+                file1HeadersDiv.querySelectorAll('.header-item.selected').forEach(item => item.classList.remove('selected'));
+                updateSelectedCount(1);
+            } else {
+                selectedHeaders2 = [];
+                file2HeadersDiv.querySelectorAll('.header-item.selected').forEach(item => item.classList.remove('selected'));
+                updateSelectedCount(2);
+            }
+            columnMapping = {};
+            mappingSection.classList.add('hidden');
+            resultsSection.classList.add('hidden');
+            analysisSection.classList.add('hidden'); // Hide analysis on reset
+            reconciliationSummaryData = null; // Clear summary data
+            reconcileButton.disabled = true;
+        }
+
+        function updateMappingSection() { /* ... (unchanged from previous version, handles auto-mapping) ... */
+            selectedHeaders1.sort((a, b) => a.originalIndex - b.originalIndex);
+            selectedHeaders2.sort((a, b) => a.originalIndex - b.originalIndex);
+            if (selectedHeaders1.length === MAX_SELECTED_COLUMNS && selectedHeaders2.length === MAX_SELECTED_COLUMNS) {
+                mappingGrid.innerHTML = '';
+                columnMapping = {};
+                selectedHeaders1.forEach((h1) => {
+                    const file1HeaderName = h1.header;
+                    const file1DisplayText = file1HeaderName || `(Column ${h1.originalIndex + 1})`;
+                    const label1 = document.createElement('div');
+                    label1.textContent = file1DisplayText;
+                    label1.classList.add('p-2', 'bg-gray-100', 'rounded', 'text-sm', 'text-right', 'font-medium', 'truncate');
+                    label1.title = file1DisplayText;
+                    const separator = document.createElement('div');
+                    separator.innerHTML = '&rarr;';
+                    separator.classList.add('text-center', 'text-gray-500', 'font-bold');
+                    const select2 = document.createElement('select');
+                    select2.classList.add('p-2', 'border', 'border-gray-300', 'rounded', 'text-sm', 'w-full');
+                    select2.dataset.file1Header = file1HeaderName;
+                    const placeholderOption = document.createElement('option');
+                    placeholderOption.value = ""; placeholderOption.textContent = "Select File 2 Column"; placeholderOption.disabled = true;
+                    select2.appendChild(placeholderOption);
+                    selectedHeaders2.forEach((h2) => {
+                        const option = document.createElement('option');
+                        option.value = h2.header; option.textContent = h2.header || `(Column ${h2.originalIndex + 1})`;
+                        select2.appendChild(option);
+                    });
+                    const matchingH2 = selectedHeaders2.find(h2 => (h1.header || '').trim().toLowerCase() === (h2.header || '').trim().toLowerCase());
+                    if (matchingH2) {
+                        select2.value = matchingH2.header;
+                        columnMapping[file1HeaderName] = matchingH2.header; // Initial mapping
+                    } else {
+                        select2.value = "";
+                    }
+                    select2.onchange = (e) => {
+                        const selectedFile2Header = e.target.value;
+                        const file1Hdr = e.target.dataset.file1Header;
+                        if (selectedFile2Header) {
+                            const isAlreadyMapped = Object.values(columnMapping).includes(selectedFile2Header);
+                            if (isAlreadyMapped && columnMapping[file1Hdr] !== selectedFile2Header) {
+                                showMessage(`Column "${selectedFile2Header || '(Blank)'}" in File 2 is already mapped.`, 'error');
+                                e.target.value = columnMapping[file1Hdr] || "";
+                                return;
+                            }
+                            columnMapping[file1Hdr] = selectedFile2Header;
+                        } else {
+                            delete columnMapping[file1Hdr];
+                        }
+                        checkReconcileButtonState();
+                    };
+                    mappingGrid.appendChild(label1); mappingGrid.appendChild(separator); mappingGrid.appendChild(select2);
+                });
+                mappingSection.classList.remove('hidden');
+            } else {
+                mappingSection.classList.add('hidden');
+            }
+             checkReconcileButtonState();
+        }
+
+        function checkReconcileButtonState() { /* ... (unchanged from previous version) ... */
+            const filesUploaded = file1 && file2;
+            const headersSelected = selectedHeaders1.length === MAX_SELECTED_COLUMNS && selectedHeaders2.length === MAX_SELECTED_COLUMNS;
+            const mappingComplete = headersSelected && selectedHeaders1.every(h1 => columnMapping[h1.header] !== undefined && columnMapping[h1.header] !== "");
+            reconcileButton.disabled = !(filesUploaded && headersSelected && mappingComplete);
+        }
+
+        // --- Drag and Drop Event Handlers ---
+        function setupDragDrop(dropArea, fileInput, fileIndex) { /* ... (unchanged from previous version) ... */
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropArea.addEventListener(eventName, preventDefaults, false));
+            function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+            ['dragenter', 'dragover'].forEach(eventName => dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false));
+            ['dragleave', 'drop'].forEach(eventName => dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false));
+            dropArea.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer; const files = dt.files;
+                if (files.length > 0) { fileInput.files = files; handleFileSelect(files[0], fileIndex); }
+            }, false);
+        }
+
+        // --- AI Recommendations ---
+        async function getColumnRecommendations() { /* ... (unchanged from previous version) ... */
+            if (!file1 || !file2) return; // Don't proceed if files aren't ready
+            try {
+                recommendationDisplay.innerHTML = '<div class="text-center text-gray-600 py-4">Analyzing files for recommendations...</div>';
+                recommendationSection.classList.remove('hidden');
+                const formData = new FormData();
+                formData.append('file1', file1); formData.append('file2', file2);
+                const response = await fetch(`${BACKEND_URL}/recommend-columns`, { method: 'POST', body: formData });
+                if (response.ok) {
+                    const data = await response.json();
+                    const recommendations = data.recommendations; // Assuming backend returns JSON in this structure
+                    recommendationDisplay.innerHTML = `
+                        <div class="mb-4">
+                            <h4 class="font-medium text-yellow-800 mb-2">Recommended Columns:</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div><p class="font-medium text-sm">File 1:</p><ul class="list-disc list-inside text-sm">${recommendations.file1_recommendations.map(col => `<li>${col || '(Blank)'}</li>`).join('')}</ul></div>
+                                <div><p class="font-medium text-sm">File 2:</p><ul class="list-disc list-inside text-sm">${recommendations.file2_recommendations.map(col => `<li>${col || '(Blank)'}</li>`).join('')}</ul></div>
+                            </div>
+                        </div>
+                        <div class="mb-4"><h4 class="font-medium text-yellow-800 mb-2">Explanation:</h4><p class="text-sm">${recommendations.explanation}</p></div>
+                        <div><h4 class="font-medium text-yellow-800 mb-2">Considerations:</h4><p class="text-sm">${recommendations.considerations}</p></div>`;
+                    window.recommendations = recommendations; // Store for applyRecommendations
+                } else {
+                    const errorData = await response.json();
+                    recommendationDisplay.innerHTML = `<div class="text-red-600"><p class="font-medium">Error fetching recommendations:</p><p class="text-sm mt-1">${errorData.error || 'Unknown error'}${errorData.details ? `<br>Details: ${errorData.details}` : ''}</p></div>`;
+                    recommendationSection.classList.add('hidden'); // Hide on error
+                }
+            } catch (error) {
+                recommendationDisplay.innerHTML = `<div class="text-red-600"><p class="font-medium">Error:</p><p class="text-sm mt-1">${error.message}</p></div>`;
+                 recommendationSection.classList.add('hidden'); // Hide on error
+            }
+        }
+
+        function applyRecommendations() { /* ... (unchanged from previous version) ... */
+            if (!window.recommendations) return;
+            resetSelection(1); resetSelection(2); // Clear existing selections first
+            const recommendations = window.recommendations;
+            recommendations.file1_recommendations.forEach(col => {
+                const item = file1HeadersDiv.querySelector(`[data-header="${col}"]`);
+                if (item) toggleHeaderSelection(item, 1);
+            });
+            recommendations.file2_recommendations.forEach(col => {
+                const item = file2HeadersDiv.querySelector(`[data-header="${col}"]`);
+                if (item) toggleHeaderSelection(item, 2);
+            });
+            recommendationSection.classList.add('hidden'); // Hide after applying
+            updateMappingSection(); // Update mapping based on new selections
+        }
+
+        // --- Reconciliation Logic ---
+        async function reconcileFiles() { /* ... (unchanged from previous version, calls displaySummary) ... */
+            if (reconcileButton.disabled) return;
+            reconcileButton.disabled = true;
+            progressSection.classList.remove('hidden');
+            resultsSection.classList.add('hidden');
+            analysisSection.classList.add('hidden'); // Hide previous analysis
+            progressText.textContent = "Uploading files and preparing reconciliation...";
+            reportBlob = null;
+            reconciliationSummaryData = null; // Clear previous summary
+
+            const formData = new FormData();
+            formData.append('file1', file1, file1.name);
+            formData.append('file2', file2, file2.name);
+            formData.append('file1_key_headers', JSON.stringify(selectedHeaders1.map(h => h.header)));
+            formData.append('file2_key_headers', JSON.stringify(selectedHeaders2.map(h => h.header))); // Send selected File 2 headers for validation
+            formData.append('column_mapping', JSON.stringify(columnMapping));
+
+            try {
+                progressText.textContent = "Processing files on server... Please wait.";
+                const response = await fetch(`${BACKEND_URL}/reconcile`, { method: 'POST', body: formData });
+                if (response.ok) {
+                    reportBlob = await response.blob();
+                    const summaryHeader = response.headers.get('X-Reconciliation-Summary');
+                    if (summaryHeader) {
+                        try {
+                             const decodedSummary = atob(summaryHeader);
+                             reconciliationSummaryData = JSON.parse(decodedSummary); // Store summary
+                             displaySummary(reconciliationSummaryData); // Display summary
+                             resultsSection.classList.remove('hidden');
+                             showMessage('Reconciliation successful!', 'success');
+                        } catch (e) {
+                             console.error("Error parsing summary header:", e);
+                             summaryDisplay.textContent = "Reconciliation complete. Summary data unavailable.";
+                             resultsSection.classList.remove('hidden'); // Still show download
+                             showMessage('Reconciliation complete, but summary could not be displayed.', 'info');
+                        }
+                    } else {
+                        summaryDisplay.textContent = "Reconciliation complete. No summary provided.";
+                        resultsSection.classList.remove('hidden');
+                        showMessage('Reconciliation successful! Report ready.', 'success');
+                    }
+                } else {
+                    const errorData = await response.json();
+                    showMessage(`Error: ${errorData.error || 'Unknown reconciliation error.'}`, 'error', 10000);
+                    console.error("Backend reconcile error:", errorData);
+                }
+            } catch (error) {
+                showMessage(`Network/server error: ${error.message}. Ensure backend is running.`, 'error', 10000);
+                console.error("Fetch reconcile error:", error);
+            } finally {
+                progressSection.classList.add('hidden');
+                reconcileButton.disabled = false;
+                downloadReportButton.disabled = !reportBlob; // Enable download only if blob exists
+                 analyzeButton.disabled = !reconciliationSummaryData; // Enable analysis only if summary exists
+                 if (!reportBlob) resultsSection.classList.add('hidden'); // Hide results if no report
+            }
+        }
+
+        function displaySummary(summaryData) { /* ... (unchanged from previous version) ... */
+             summaryDisplay.innerHTML = `
+                <h3 class="text-lg font-semibold mb-2 text-gray-700">Reconciliation Summary</h3>
+                <p><strong>File 1:</strong> ${summaryData.file1_name || 'N/A'} (${summaryData.total_file1} records)</p>
+                <p><strong>File 2:</strong> ${summaryData.file2_name || 'N/A'} (${summaryData.total_file2} records)</p>
+                <hr class="my-2 border-gray-200">
+                <p><strong>Matched Records (Identical):</strong> ${summaryData.matched_identical}</p>
+                <p><strong>Matched Records (with Discrepancies):</strong> ${summaryData.matched_discrepancies}</p>
+                <p><strong>Records Unique to File 1:</strong> ${summaryData.unique_file1}</p>
+                <p><strong>Records Unique to File 2:</strong> ${summaryData.unique_file2}</p>
+                <hr class="my-2 border-gray-200">
+                <p class="text-xs text-gray-500 mt-1">File 1 Keys: ${summaryData.file1_key_headers ? summaryData.file1_key_headers.join(', ') : 'N/A'}</p>
+                <p class="text-xs text-gray-500">File 2 Keys (Mapped): ${summaryData.file2_key_headers ? summaryData.file2_key_headers.join(', ') : 'N/A'}</p>
+                <p class="text-xs text-gray-500">Reconciled on: ${summaryData.timestamp ? new Date(summaryData.timestamp).toLocaleString() : 'N/A'}</p>
+            `;
+             analyzeButton.disabled = false; // Enable analysis button
+        }
+
+        // --- AI Analysis ---
+        async function getAnalysis() {
+            if (!reconciliationSummaryData) {
+                 showMessage('No summary data available for analysis.', 'error');
+                 return;
+            }
+
+            analyzeButton.disabled = true; // Disable button during analysis
+            analysisDisplay.textContent = "Analyzing reconciliation results with AI...";
+            analysisSection.classList.remove('hidden');
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ summary: reconciliationSummaryData }) // Send stored summary
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    analysisDisplay.textContent = data.analysis; // Display the analysis text
+                    showMessage('AI Analysis complete!', 'success');
+                } else {
+                    // Handle specific backend errors if possible
+                    const errorData = await response.json();
+                    const errorMessage = errorData.error || 'Unknown analysis error';
+                    const errorDetails = errorData.details || 'No details provided.';
+
+                    // ** UPDATED ERROR HANDLING **
+                    analysisDisplay.innerHTML = `
+                        <div class="text-red-600 font-medium">Error getting AI analysis: ${errorMessage}</div>
+                        <div class="mt-2 text-sm text-gray-600">Details: ${errorDetails}</div>
+                        <div class="mt-4">
+                            <p class="text-sm font-medium">Troubleshooting steps:</p>
+                            <ol class="list-decimal list-inside text-sm text-gray-600 mt-1">
+                                <li>Ensure the backend server (<code class="inline-code">reconciliation_app.py</code>) is running.</li>
+                                <li>Verify the OpenAI API key is correctly set (e.g., in <code class="inline-code">.env</code> file or code) and has available quota.</li>
+                                <li>Check the backend server logs for more specific error messages.</li>
+                                <li>Check your network connection to the backend and OpenAI.</li>
+                            </ol>
+                        </div>
+                    `;
+                    showMessage('Failed to get AI analysis', 'error');
+                    console.error("Analysis Error:", errorData);
+                }
+            } catch (error) {
+                 // ** UPDATED ERROR HANDLING **
+                 analysisDisplay.innerHTML = `
+                    <div class="text-red-600 font-medium">Network or Frontend Error: ${error.message}</div>
+                    <div class="mt-4">
+                        <p class="text-sm font-medium">Troubleshooting steps:</p>
+                        <ol class="list-decimal list-inside text-sm text-gray-600 mt-1">
+                           <li>Ensure the backend server (<code class="inline-code">reconciliation_app.py</code>) is running at <code class="inline-code">${BACKEND_URL}</code>.</li>
+                           <li>Check your browser's console (F12) for more detailed network errors.</li>
+                           <li>Verify your network connection.</li>
+                        </ol>
+                    </div>
+                 `;
+                showMessage('Failed to connect for analysis', 'error');
+                console.error("Fetch analysis error:", error);
+            } finally {
+                analyzeButton.disabled = false; // Re-enable button
+            }
+        }
+
+        // --- Download Report ---
+        function downloadReport() { /* ... (unchanged from previous version) ... */
+             if (!reportBlob) { showMessage("No report available.", "error"); return; }
+            const url = window.URL.createObjectURL(reportBlob);
+            const a = document.createElement('a');
+            a.style.display = 'none'; a.href = url;
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[-T:]/g, '');
+            const f1Name = file1 ? file1.name.replace(/\.[^/.]+$/, "").substring(0,15) : "File1";
+            const f2Name = file2 ? file2.name.replace(/\.[^/.]+$/, "").substring(0,15) : "File2";
+            a.download = `Reconciliation_${f1Name}_vs_${f2Name}_${timestamp}.xlsx`;
+            document.body.appendChild(a); a.click();
+            window.URL.revokeObjectURL(url); document.body.removeChild(a);
+            showMessage("Report download started.", "success");
+        }
+
+        // --- Event Listeners ---
+        file1Input.addEventListener('change', (e) => handleFileSelect(e.target.files[0], 1));
+        file2Input.addEventListener('change', (e) => handleFileSelect(e.target.files[0], 2));
+        setupDragDrop(file1DropArea, file1Input, 1);
+        setupDragDrop(file2DropArea, file2Input, 2);
+        acceptRecommendationsButton.addEventListener('click', applyRecommendations);
+        overrideRecommendationsButton.addEventListener('click', () => recommendationSection.classList.add('hidden'));
+        reconcileButton.addEventListener('click', reconcileFiles);
+        downloadReportButton.addEventListener('click', downloadReport);
+        analyzeButton.addEventListener('click', getAnalysis);
+
+        // --- Initial Setup ---
+        checkReconcileButtonState();
+        analyzeButton.disabled = true; // Initially disable analysis button
+        downloadReportButton.disabled = true; // Initially disable download button
+
+    </script>
+</body>
+</html>
